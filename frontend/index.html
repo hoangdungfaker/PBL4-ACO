@@ -9,7 +9,7 @@
   <!-- Leaflet.js CSS (cho chế độ bản đồ 2D) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css?v=2.8">
+  <link rel="stylesheet" href="style.css?v=3.0">
 </head>
 
 <body>
@@ -96,6 +96,19 @@
             <option value="50" selected>50 — Mặc định</option>
             <option value="100">100 — Chính xác hơn</option>
           </select>
+        </div>
+
+        <!-- Trọng số né tránh tắc nghẽn (Congestion Avoidance Weight) -->
+        <div class="form-group">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <label for="inp-congestion-weight" style="margin-bottom:0">
+              <span class="label-dot" style="background:#f59e0b"></span>
+              Phạt tắc nghẽn <span style="color:#64748b;font-weight:400">(Trọng số né nghẽn)</span>
+            </label>
+            <span id="val-congestion-weight" style="font-size:11px;font-weight:700;color:#fbbf24">3.5</span>
+          </div>
+          <input type="range" id="inp-congestion-weight" min="1.0" max="10.0" step="0.5" value="3.5"
+            style="width:100%;cursor:pointer;accent-color:#f59e0b" title="Tăng để bầy kiến né mạnh các nút nghẽn tải (tự động lưu)">
         </div>
 
         <!-- Hành động -->
@@ -511,7 +524,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-polylinedecorator/1.6.0/leaflet.polylineDecorator.min.js"></script>
 
 <!-- App JS (Quản lý 3D Globe + 2D Leaflet + WebSocket) -->
-<script src="network_map.js?v=4.4"></script>
+<script src="network_map.js?v=4.8"></script>
 
 </body>
 </html>

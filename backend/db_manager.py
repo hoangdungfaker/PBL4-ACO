@@ -104,6 +104,16 @@ def init_db() -> None:
                     details_json TEXT
                 )
             """)
+
+            # 5. Bảng lưu trữ bền vững tải lưu lượng & tham số tắc nghẽn của từng nút mạng
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS node_congestion (
+                    node_id TEXT PRIMARY KEY,
+                    load REAL NOT NULL,
+                    active_conn INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         logger.info(f"Database initialized successfully at '{DB_PATH}'")
     except Exception as e:
         logger.error(f"Lỗi khởi tạo database: {e}")
@@ -211,6 +221,58 @@ def log_network_event(event_type: str, node_id: Optional[str] = None, details: O
                 VALUES (?, ?, ?)
             """, (event_type, node_id, json.dumps(details or {})))
             return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def save_node_load(node_id: str, load: float, active_conn: Optional[int] = None) -> None:
+    """Lưu trữ bền vững giá trị tải lưu lượng của một nút mạng vào SQLite."""
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute("""
+                INSERT INTO node_congestion (node_id, load, active_conn, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    load = excluded.load,
+                    active_conn = excluded.active_conn,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (node_id, float(load), active_conn))
+    except Exception as e:
+        logger.error(f"Lỗi lưu tải nút '{node_id}' vào SQLite: {e}")
+    finally:
+        conn.close()
+
+
+def get_all_node_loads() -> Dict[str, Dict[str, Any]]:
+    """Truy xuất toàn bộ tải lưu lượng các nút đã lưu từ SQLite."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("SELECT node_id, load, active_conn FROM node_congestion")
+        rows = cursor.fetchall()
+        result = {}
+        for r in rows:
+            result[r["node_id"]] = {
+                "load": float(r["load"]),
+                "active_conn": r["active_conn"],
+                "is_congested": float(r["load"]) >= 0.75,
+            }
+        return result
+    except Exception as e:
+        logger.error(f"Lỗi đọc node_congestion từ SQLite: {e}")
+        return {}
+    finally:
+        conn.close()
+
+
+def reset_node_loads() -> None:
+    """Xóa trắng cấu hình tải lưu lượng tùy chỉnh để đưa về mặc định."""
+    conn = get_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM node_congestion")
+    except Exception as e:
+        logger.error(f"Lỗi reset node_congestion trong SQLite: {e}")
     finally:
         conn.close()
 

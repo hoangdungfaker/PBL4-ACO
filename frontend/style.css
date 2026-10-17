@@ -1124,9 +1124,18 @@ html, body {
   border: 1px solid #ef4444;
 }
 
-/* Satellite Marker Styling */
+/* Satellite Marker Styling (Càng phóng lại gần thì càng to theo góc nhìn 3D) */
 .node-satellite .marker-inner {
+  transform: scale(var(--sat-scale-3d, 1.0));
+  transform-origin: center center;
+  transition: transform 0.06s ease-out;
   filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.8));
+}
+
+.node-satellite:hover .marker-inner,
+.node-satellite.node-selected .marker-inner,
+.node-satellite.node-on-route .marker-inner {
+  transform: scale(calc(var(--sat-scale-3d, 1.0) * 1.25)) !important;
 }
 
 .node-satellite .satellite-svg {
@@ -1134,6 +1143,13 @@ html, body {
   height: 22px;
   overflow: visible;
   animation: satFloat 3s ease-in-out infinite alternate;
+}
+
+/* Phóng to vệ tinh khi phóng lại gần bản đồ 2D Leaflet */
+.leaflet-marker-icon.sat-marker-2d div {
+  transform: scale(var(--sat-scale-2d, 1.0));
+  transform-origin: center center;
+  transition: transform 0.1s ease-out;
 }
 
 @keyframes satFloat {

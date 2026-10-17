@@ -500,6 +500,17 @@ async def lifespan(app: FastAPI):
             f"connected={nx.is_connected(_graph)}"
         )
 
+        # Phục hồi các cấu hình tải lưu lượng / tắc nghẽn đã lưu bền vững trong CSDL SQLite
+        saved_loads = db.get_all_node_loads()
+        for nid, ldata in saved_loads.items():
+            if nid in _graph.nodes:
+                _topo.set_node_load(nid, ldata["load"], ldata.get("active_conn"))
+                _graph.nodes[nid]["load"] = ldata["load"]
+                if "active_conn" in ldata and ldata["active_conn"] is not None:
+                    _graph.nodes[nid]["active_conn"] = ldata["active_conn"]
+        if saved_loads:
+            logger.info(f"Đã phục hồi trạng thái tải cho {len(saved_loads)} nút từ SQLite DB")
+
         # Khởi chạy luồng cập nhật chuyển động quỹ đạo vệ tinh SGP4
         _orbit_task = asyncio.create_task(orbit_simulation_loop())
 
@@ -801,6 +812,10 @@ async def set_node_traffic_load(
     _graph.nodes[node_id]["load"] = clamped_load
     _graph.nodes[node_id]["active_conn"] = int(clamped_load * capacity)
 
+    # Lưu bền vững vào SQLite DB
+    db.save_node_load(node_id, clamped_load, int(clamped_load * capacity))
+    db.log_network_event("CONGESTION", node_id, {"load": clamped_load, "is_congested": clamped_load >= 0.75})
+
     # Broadcast sự kiện qua WebSocket
     await manager.broadcast({
         "type"        : "NODE_LOAD_CHANGED",
@@ -865,6 +880,8 @@ async def reset_traffic():
         if nid in _graph.nodes:
             _graph.nodes[nid]["load"] = stat["load"]
             _graph.nodes[nid]["active_conn"] = stat["active_conn"]
+
+    db.reset_node_loads()
 
     await manager.broadcast({
         "type" : "TRAFFIC_RESET",
@@ -983,6 +1000,7 @@ async def get_routing(
     destination: str = Query(..., description="Tên node đích, VD: SHIP_1"),
     n_ants     : int = Query(default=15, ge=1, le=50),
     n_iter     : int = Query(default=50, ge=1, le=200),
+    congestion_weight: float = Query(default=3.5, ge=0.5, le=20.0, description="Hệ số phạt tắc nghẽn né nút nghẽn"),
     broadcast  : bool = Query(default=True, description="Broadcast progress qua WebSocket"),
 ):
     """
@@ -994,6 +1012,7 @@ async def get_routing(
     - `destination`: Tên node đích
     - `n_ants`     : Số kiến (1-50)
     - `n_iter`     : Số iteration (1-200)
+    - `congestion_weight`: Hệ số phạt né nút nghẽn (0.5 - 20.0)
     - `broadcast`  : Gửi tiến trình qua WebSocket không?
     """
     if _graph is None:
@@ -1021,7 +1040,7 @@ async def get_routing(
             detail=f"Node '{destination}' không tồn tại. Các node: {_node_list}"
         )
 
-    logger.info(f"REST /routing: {source} → {destination}")
+    logger.info(f"REST /routing: {source} → {destination} | congestion_weight={congestion_weight}")
 
     # ── Callback broadcast qua WebSocket ──
     def aco_callback(iteration: int, best: AntPath, pheromone: np.ndarray, nodes: List[str]):
@@ -1044,7 +1063,7 @@ async def get_routing(
         _broadcast_sync(msg)
 
     # ── Chạy ACO ──
-    aco    = ACOAlgorithm(_graph, n_ants=n_ants, n_iterations=n_iter, callback=aco_callback)
+    aco    = ACOAlgorithm(_graph, n_ants=n_ants, n_iterations=n_iter, congestion_weight=congestion_weight, callback=aco_callback)
     result = aco.run(source, destination)
 
     if not result.converged:
@@ -1150,6 +1169,7 @@ async def compare_aco_vs_dijkstra(
     destination: str = Query(..., description="Node đích, VD: SHIP_1"),
     n_ants     : int = Query(default=15, ge=1, le=50),
     n_iter     : int = Query(default=50, ge=1, le=200),
+    congestion_weight: float = Query(default=3.5, ge=0.5, le=20.0, description="Hệ số phạt tắc nghẽn né nút nghẽn"),
 ):
     """
     **So sánh ACO vs Dijkstra** — Dùng cho thuyết trình để chứng minh ACO đúng.
@@ -1173,7 +1193,7 @@ async def compare_aco_vs_dijkstra(
     if destination not in _graph.nodes:
         raise HTTPException(status_code=404, detail=f"Node '{destination}' không tồn tại")
 
-    logger.info(f"COMPARE: {source} → {destination}")
+    logger.info(f"COMPARE: {source} → {destination} | congestion_weight={congestion_weight}")
 
     # ── 1. Chạy Dijkstra (ground-truth khoảng cách vật lý) ───────────────────
     try:
@@ -1197,7 +1217,7 @@ async def compare_aco_vs_dijkstra(
     dijkstra_cost = dijkstra_prop + dijkstra_queue
 
     # ── 2. Chạy ACO ──────────────────────────────────────────────────────────
-    aco    = ACOAlgorithm(_graph, n_ants=n_ants, n_iterations=n_iter)
+    aco    = ACOAlgorithm(_graph, n_ants=n_ants, n_iterations=n_iter, congestion_weight=congestion_weight)
     result = aco.run(source, destination)
     aco_ok = result.converged
 
@@ -1240,6 +1260,9 @@ async def compare_aco_vs_dijkstra(
         "aco_quality_pct": aco_quality_pct,
     })
 
+    cost_diff_val = (result.best_cost_ms - dijkstra_cost) if (aco_ok and dijkstra_ok) else 0.0
+    cost_diff_pct_val = (cost_diff_val / dijkstra_cost * 100.0) if (aco_ok and dijkstra_ok and dijkstra_cost > 0) else 0.0
+
     # Lưu kết quả đối chiếu vào SQLite database
     db.save_comparison_record(
         source=source,
@@ -1252,7 +1275,7 @@ async def compare_aco_vs_dijkstra(
         dijkstra_cost_ms=dijkstra_cost if dijkstra_ok else 0.0,
         dijkstra_hops=len(dijkstra_path) - 1 if dijkstra_ok else 0,
         dijkstra_path=dijkstra_path if dijkstra_ok else [],
-        cost_diff_pct=round(cost_diff_pct, 2) if (aco_ok and dijkstra_ok) else 0.0,
+        cost_diff_pct=round(cost_diff_pct_val, 2),
         aco_quality_pct=round(aco_quality_pct, 2) if aco_quality_pct is not None else 100.0,
         verdict=verdict
     )
@@ -1459,6 +1482,10 @@ async def websocket_endpoint(websocket: WebSocket):
                          "message": f"Node không tồn tại: {src} hoặc {dst}"})
                     continue
 
+                n_ants_req = int(msg.get("n_ants", 15))
+                n_iter_req = int(msg.get("n_iterations", 50))
+                cong_w_req = float(msg.get("congestion_weight", 3.5))
+
                 # Chạy ACO trong thread riêng (không block event loop)
                 def run_aco_ws():
                     def cb(it, best, ph, nl):
@@ -1474,7 +1501,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "destination" : dst,
                         })
 
-                    aco = ACOAlgorithm(_graph, n_ants=15, n_iterations=50, callback=cb)
+                    aco = ACOAlgorithm(_graph, n_ants=n_ants_req, n_iterations=n_iter_req, congestion_weight=cong_w_req, callback=cb)
                     result = aco.run(src, dst)
                     if result.converged:
                         global _active_route_src, _active_route_dst, _active_route_path, _active_route_cost, _active_route_prop, _active_route_queue
@@ -1488,8 +1515,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         db.save_routing_record(
                             source=src,
                             destination=dst,
-                            n_ants=15,
-                            n_iterations=50,
+                            n_ants=n_ants_req,
+                            n_iterations=n_iter_req,
                             path=result.best_path,
                             cost_ms=result.best_cost_ms,
                             prop_delay_ms=result.prop_delay_ms,

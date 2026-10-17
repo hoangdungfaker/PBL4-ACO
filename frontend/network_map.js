@@ -33,6 +33,7 @@ let topology         = { nodes: [], edges: [] };
 let nodeLookup       = {};          // id -> node object
 let bestPathCoords     = [];
 let dijkstraPathCoords = [];          // Tọa độ đường đi chuẩn Dijkstra (Màu Vàng)
+let userRouteActive    = false;       // Chỉ cho phép vẽ đường khi người dùng đã chủ động kích hoạt
 let isRunning        = false;
 let currentIter      = 0;
 let totalIter        = 50;
@@ -47,6 +48,7 @@ let orbitRunning     = true;        // Trạng thái chuyển động quỹ đ�
 let orbitSpeed       = 15;          // Hệ số tua thời gian (1x, 5x, 15x, 30x, 60x)
 let cachedHtmlElements = [];        // Mảng đối tượng tham chiếu bền vững cho 3D Globe
 let cachedHtmlElementMap = new Map(); // id -> cachedHtmlElement
+let satPosMap        = new Map();   // id -> sat object { id, lat, lon, alt_km, vel } (Đồng bộ thời gian thực 2D & 3D)
 let cloudsMesh       = null;        // Three.js Mesh cho tầng mây khí quyển
 let cloudsEnabled    = true;        // Trạng thái bật/tắt mây
 let lastRouteArcUpdate   = 0;       // Timestamp giới hạn tần suất vẽ lại Arcs khi có tuyến đường
@@ -74,11 +76,14 @@ function getNodeAltitude(node) {
   const id = String(node.id || node.name || '');
   const type = node.type || (id.startsWith('SAT_') ? 'satellite' : (id.startsWith('UAV_') ? 'uav' : (id.startsWith('SHIP_') ? 'ship' : 'ground')));
   if (type === 'satellite') {
-    // Vệ tinh LEO (300 - 550 km) được ánh xạ lên độ cao quỹ đạo 0.14 ~ 0.18 (bay bổng rõ rệt trong không gian)
-    const alt = node.alt_km || 500;
-    return 0.14 + Math.min(Math.max((alt - 300) / 300, 0), 1) * 0.04;
+    // Độ cao quỹ đạo thực tế được tính toán chuẩn xác từ file TLE (SGP4 propagator)
+    // TLE có các vệ tinh dao động từ 241 km đến 521 km
+    // Bán kính Trái Đất R = 6371 km. Tỉ lệ phóng đại trực quan 2.5x
+    // Giữ nguyên 100% tỉ lệ chênh lệch thực giữa các vệ tinh (vệ tinh 520km cao hơn gấp đôi vệ tinh 240km)
+    const altKm = Number(node.alt_km) || 390.0;
+    return (altKm / 6371.0) * 2.5;
   }
-  if (type === 'uav') return 0.04; // Tầng không trung (Air)
+  if (type === 'uav') return 0.025; // Tầng không trung (Air)
   return 0.005; // Trạm mặt đất và tàu biển (Ground / Sea)
 }
 
@@ -320,17 +325,21 @@ function init3DGlobe() {
     .pathDashGap(d => d.dashGap || 0.0)
     .pathDashAnimateTime(d => d.animateTime || 0);
 
-  // Cấu hình xoay camera tự động
+  // Cấu hình xoay camera tự động & co giãn kích thước vệ tinh theo cự ly
   const controls = globe.controls();
   if (controls) {
     controls.autoRotate = autoRotate;
     controls.autoRotateSpeed = 0.5;
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
+
+    // Lắng nghe sự kiện di chuyển/zoom camera: Càng phóng lại gần thì vệ tinh càng thu nhỏ lại
+    controls.addEventListener('change', updateSatelliteZoomScale);
   }
 
   // Góc nhìn mặc định: Hướng về Biển Đông & Việt Nam
   globe.pointOfView({ lat: 15.0, lng: 112.0, altitude: 2.2 }, 1000);
+  setTimeout(updateSatelliteZoomScale, 50);
 
   // Tạo lớp mây khí quyển chuyển động (Realistic Atmosphere Clouds)
   try {
@@ -365,6 +374,30 @@ function init3DGlobe() {
   }
 
   log('Không gian 3D sẵn sàng ✓', 'success');
+}
+
+// ── Hàm co giãn kích thước icon vệ tinh theo cự ly camera (Càng phóng lại gần thì càng to) ──
+function updateSatelliteZoomScale() {
+  if (!globe) return;
+  const pov = globe.pointOfView ? globe.pointOfView() : null;
+  if (!pov || pov.altitude === undefined) return;
+
+  // pov.altitude dao động từ ~0.25 (phóng sát sạt) đến ~3.5 (nhìn từ ngoài vũ trụ)
+  // Càng phóng lại gần (altitude càng nhỏ), vệ tinh càng to dần lên theo hiệu ứng thị sai (3D perspective):
+  // - Ở xa ngoài vũ trụ (alt >= 2.8): scale = 0.50 (nhỏ gọn, thanh mảnh, không che lấp Trái Đất)
+  // - Ở cự ly mặc định (alt ~ 2.0 - 2.2): scale = 0.72 (cân đối, sắc nét)
+  // - Ở cự ly gần (alt ~ 1.0 - 1.2): scale = 1.05 (to rõ, chi tiết)
+  // - Phóng sát sạt vào vệ tinh (alt <= 0.35): scale = 1.45 (rực rỡ, nhìn rõ từng tấm pin mặt trời và anten)
+  const a = pov.altitude;
+  const minAlt = 0.30;
+  const maxAlt = 2.80;
+  const norm = Math.min(Math.max((a - minAlt) / (maxAlt - minAlt), 0), 1);
+  const scale = 1.45 - Math.pow(norm, 0.85) * 0.95;
+
+  const container = document.getElementById('globe-3d');
+  if (container) {
+    container.style.setProperty('--sat-scale-3d', scale.toFixed(3));
+  }
 }
 
 // ── HTML Tooltip khi hover trên 3D Globe ────────────────────────
@@ -697,6 +730,9 @@ function toggleISLDisplay() {
     log('3D: Đã đặt lưới ISL chế độ mờ tinh tế', 'info');
   }
   updateBackgroundISLPaths(topology.edges);
+  if (activeView === '2d') {
+    update2DEdgesPositions();
+  }
 }
 
 function toggleLabelDisplay() {
@@ -771,8 +807,30 @@ function init2DMap() {
     .addTo(map)
     .setPrefix('PBL4 SAGSINs ACO');
 
-  // LayerGroup quản lý các đường vẽ ACO để dọn dẹp sạch sẽ
-  leafletGroup = L.layerGroup().addTo(map);
+  // Tạo Pane riêng với zIndex cao (550) để đường định tuyến luôn vẽ đè lên 285 cạnh nền (overlayPane = 400)
+  const routePane = map.createPane('routePane');
+  routePane.style.zIndex = '550';
+
+  // LayerGroup quản lý các đường vẽ ACO & Dijkstra trên 2D
+  leafletGroup = L.layerGroup([], { pane: 'routePane' }).addTo(map);
+
+  // Lắng nghe sự kiện zoom bản đồ để co giãn kích thước icon vệ tinh (càng phóng to lại gần thì càng nhỏ)
+  map.on('zoom', update2DSatelliteZoomScale);
+  update2DSatelliteZoomScale();
+}
+
+// ── Hàm co giãn kích thước icon vệ tinh theo cự ly zoom 2D (Càng phóng lại gần thì càng to) ──
+function update2DSatelliteZoomScale() {
+  if (!map) return;
+  const zoom = map.getZoom();
+  // Zoom 2 (nhìn toàn cầu từ xa) -> scale = 0.60 (nhỏ gọn, không đè lấn nhau)
+  // Zoom 7+ (phóng to lại gần bản đồ) -> scale = 1.30 (to rõ, chi tiết, dễ click)
+  const norm = Math.min(Math.max((zoom - 2) / 5.0, 0), 1);
+  const scale = 0.60 + norm * 0.70;
+  const mapEl = document.getElementById('map');
+  if (mapEl) {
+    mapEl.style.setProperty('--sat-scale-2d', scale.toFixed(3));
+  }
 }
 
 function getNodeIcon2D(type, isFailed = false) {
@@ -804,7 +862,7 @@ function getNodeIcon2D(type, isFailed = false) {
   }[type] || { emoji: '●', color: '#94a3b8', size: 22 };
 
   return L.divIcon({
-    className : '',
+    className : (type === 'satellite' ? 'sat-marker-2d' : ''),
     iconSize  : [cfg.size, cfg.size],
     iconAnchor: [cfg.size / 2, cfg.size / 2],
     html: `
@@ -915,6 +973,60 @@ function draw2DTopology(nodes, edges) {
   });
 
   update2DSelectionMarkers();
+
+  // Vẽ lại tuyến đường 2D (nếu đang có) để luôn nổi bật trên nền các nút mới vẽ
+  if (bestPathCoords && bestPathCoords.length >= 2) {
+    draw2DBestPath(bestPathCoords, dijkstraPathCoords, false);
+  }
+}
+
+// ── Hàm lấy tọa độ thời gian thực của nút trên bản đồ 2D (Chống lệch vị trí khi vệ tinh bay) ──
+function getLiveNodeLatLng(p) {
+  if (!p) return null;
+  const nodeId = typeof p === 'string' ? p : (p.node || p.id || p.name);
+  if (nodeId && leafletNodeMarkers[nodeId]) {
+    const ll = leafletNodeMarkers[nodeId].getLatLng();
+    if (typeof p === 'object') {
+      p.lat = ll.lat;
+      p.lon = ll.lng;
+    }
+    return [ll.lat, ll.lng];
+  }
+  if (nodeId && satPosMap.has(nodeId)) {
+    const s = satPosMap.get(nodeId);
+    if (typeof p === 'object') {
+      p.lat = s.lat;
+      p.lon = s.lon;
+    }
+    return [s.lat, s.lon];
+  }
+  const nd = nodeLookup[nodeId];
+  if (nd && nd.lat !== undefined && nd.lon !== undefined) {
+    if (typeof p === 'object') {
+      p.lat = nd.lat;
+      p.lon = nd.lon;
+    }
+    return [nd.lat, nd.lon];
+  }
+  if (p && p.lat !== undefined && p.lon !== undefined) {
+    return [p.lat, p.lon];
+  }
+  return null;
+}
+
+// ── Hàm xử lý đường nối qua đường đổi ngày (Antimeridian unwrapping) ──
+function unwrapLatLngs(latlngs) {
+  if (!latlngs || latlngs.length < 2) return latlngs;
+  const result = [[latlngs[0][0], latlngs[0][1]]];
+  for (let i = 1; i < latlngs.length; i++) {
+    let lat = latlngs[i][0];
+    let lng = latlngs[i][1];
+    let prevLng = result[i - 1][1];
+    while (lng - prevLng > 180) lng -= 360;
+    while (prevLng - lng > 180) lng += 360;
+    result.push([lat, lng]);
+  }
+  return result;
 }
 
 function draw2DBestPath(pathCoords, dijkstraCoords = null, autoFit = false) {
@@ -926,20 +1038,32 @@ function draw2DBestPath(pathCoords, dijkstraCoords = null, autoFit = false) {
 
   let bounds = null;
 
-  // 1. Vẽ đường Dijkstra MÀU VÀNG (Nếu có)
+  // 1. Vẽ đường Dijkstra MÀU VÀNG (Nếu có) — Bám dính chính xác vào tâm vệ tinh đang bay
   if (dCoords && dCoords.length >= 2) {
-    const dijkLatLngs = dCoords
-      .filter(p => p.lat !== undefined && p.lon !== undefined)
-      .map(p => [p.lat, p.lon]);
+    const rawLatLngs = dCoords
+      .map(p => getLiveNodeLatLng(p))
+      .filter(p => p !== null);
+    const dijkLatLngs = unwrapLatLngs(rawLatLngs);
 
     if (dijkLatLngs.length >= 2) {
-      // Đường chính vàng nét đứt thanh mảnh
+      // Lớp phát sáng nền (Glow Casing)
+      const dijkGlow = L.polyline(dijkLatLngs, {
+        color    : '#facc15',
+        weight   : 6.0,
+        opacity  : 0.35,
+        lineCap  : 'round',
+        pane     : 'routePane',
+      });
+      leafletGroup.addLayer(dijkGlow);
+
+      // Đường chính vàng nét đứt
       const dijkLine = L.polyline(dijkLatLngs, {
         color    : '#facc15',
-        weight   : 2.5,
+        weight   : 3.5,
         opacity  : 0.95,
-        dashArray: '6, 6',
+        dashArray: '8, 8',
         lineCap  : 'round',
+        pane     : 'routePane',
       });
       dijkLine.bindTooltip('📐 Tuyến đường Dijkstra (Tối ưu chuẩn — Màu Vàng)', { sticky: true });
       leafletGroup.addLayer(dijkLine);
@@ -970,19 +1094,31 @@ function draw2DBestPath(pathCoords, dijkstraCoords = null, autoFit = false) {
     }
   }
 
-  // 2. Vẽ đường ACO MÀU ĐỎ (Nếu có)
+  // 2. Vẽ đường ACO MÀU ĐỎ LASER NỔI BẬT (Nếu có) — Bám dính 100% tọa độ live của vệ tinh
   if (aCoords && aCoords.length >= 2) {
-    const acoLatLngs = aCoords
-      .filter(p => p.lat !== undefined && p.lon !== undefined)
-      .map(p => [p.lat, p.lon]);
+    const rawLatLngs = aCoords
+      .map(p => getLiveNodeLatLng(p))
+      .filter(p => p !== null);
+    const acoLatLngs = unwrapLatLngs(rawLatLngs);
 
     if (acoLatLngs.length >= 2) {
-      // Đường chính đỏ laser thanh mảnh
+      // Lớp phát sáng đỏ neon rực rỡ nền
+      const glowLine = L.polyline(acoLatLngs, {
+        color  : '#ef4444',
+        weight : 7.5,
+        opacity: 0.40,
+        lineCap: 'round',
+        pane   : 'routePane',
+      });
+      leafletGroup.addLayer(glowLine);
+
+      // Đường chính laser đỏ sắc nét
       const mainLine = L.polyline(acoLatLngs, {
         color  : '#ef4444',
-        weight : 2.5,
-        opacity: 0.95,
+        weight : 3.8,
+        opacity: 1.0,
         lineCap: 'round',
+        pane   : 'routePane',
       });
       mainLine.bindTooltip('🐜 Tuyến đường ACO (Bầy kiến — Màu Đỏ)', { sticky: true });
       leafletGroup.addLayer(mainLine);
@@ -996,9 +1132,9 @@ function draw2DBestPath(pathCoords, dijkstraCoords = null, autoFit = false) {
                 offset: '30px',
                 repeat: '60px',
                 symbol: L.Symbol.arrowHead({
-                  pixelSize: 9,
+                  pixelSize: 10,
                   polygon: false,
-                  pathOptions: { stroke: true, color: '#ef4444', weight: 2.4, opacity: 0.95 }
+                  pathOptions: { stroke: true, color: '#ff4444', weight: 2.4, opacity: 1.0 }
                 })
               }
             ]
@@ -1018,9 +1154,10 @@ function draw2DBestPath(pathCoords, dijkstraCoords = null, autoFit = false) {
     multiFlows.forEach((fl, idx) => {
       const flCoords = fl.path_coords || fl.coords;
       if (flCoords && flCoords.length >= 2) {
-        const latlngs = flCoords
-          .filter(p => p.lat !== undefined && p.lon !== undefined)
-          .map(p => [p.lat, p.lon]);
+        const rawLatLngs = flCoords
+          .map(p => getLiveNodeLatLng(p))
+          .filter(p => p !== null);
+        const latlngs = unwrapLatLngs(rawLatLngs);
         if (latlngs.length >= 2) {
           const color = fl.color || '#38bdf8';
           const line = L.polyline(latlngs, {
@@ -1028,6 +1165,7 @@ function draw2DBestPath(pathCoords, dijkstraCoords = null, autoFit = false) {
             weight : 2.5,
             opacity: 0.95,
             lineCap: 'round',
+            pane   : 'routePane',
           });
           line.bindTooltip(`⚡ ${fl.name} (${fl.hops} hops | ${fl.cost_ms}ms)`, { sticky: true });
           leafletGroup.addLayer(line);
@@ -1098,8 +1236,22 @@ function setViewMode(mode) {
     document.getElementById('toolbar-3d').style.display = 'none';
 
     setTimeout(() => {
-      if (map) map.invalidateSize();
-    }, 50);
+      if (map) {
+        map.invalidateSize();
+        // Đồng bộ ngay lập tức vị trí vệ tinh & cạnh 2D từ satPosMap mới nhất
+        if (satPosMap && satPosMap.size > 0) {
+          satPosMap.forEach((s, id) => {
+            const marker = leafletNodeMarkers[id];
+            if (marker) marker.setLatLng([s.lat, s.lon]);
+          });
+          update2DEdgesPositions();
+        }
+        if (bestPathCoords && bestPathCoords.length >= 2) {
+          draw2DBestPath(bestPathCoords, dijkstraPathCoords, true);
+        }
+        update2DSelectionMarkers();
+      }
+    }, 80);
     log('Đã chuyển sang chế độ Bản đồ 2D', 'info');
   }
 }
@@ -1258,7 +1410,6 @@ function handleOrbitTick(msg) {
   }
 
   if (Array.isArray(msg.satellites) && msg.satellites.length > 0) {
-    const satPosMap = new Map();
     msg.satellites.forEach(s => {
       satPosMap.set(s.id, s);
       const node = nodeLookup[s.id];
@@ -1362,10 +1513,38 @@ function update2DSatellitePositions(satellites) {
     }
   });
 
-  // Cập nhật tuyến đường 2D nếu có (chỉ vài điểm, không tính toán lại 285 cạnh nền)
+  // 1. Cập nhật vị trí các liên kết ISL/GSL nền trên 2D bám theo chuyển động vệ tinh
+  update2DEdgesPositions();
+
+  // 2. Cập nhật tuyến đường 2D (ACO / Dijkstra / MultiFlows) bám khít theo tâm vệ tinh
   if (bestPathCoords && bestPathCoords.length >= 2) {
-    draw2DBestPath(bestPathCoords, dijkstraPathCoords);
+    draw2DBestPath(bestPathCoords, dijkstraPathCoords, false);
   }
+}
+
+function update2DEdgesPositions() {
+  if (!map || activeView !== '2d' || !topology || !topology.edges) return;
+  const isHidden = (islDisplayMode === 'hidden');
+  const baseOpacity = (islDisplayMode === 'dimmed') ? 0.20 : 0.45;
+
+  topology.edges.forEach(e => {
+    const line = leafletEdgeLayers[`${e.from}|${e.to}`];
+    if (!line) return;
+    if (isHidden || failedNodes.has(e.from) || failedNodes.has(e.to)) {
+      line.setStyle({ opacity: 0 });
+      return;
+    }
+    const markerA = leafletNodeMarkers[e.from];
+    const markerB = leafletNodeMarkers[e.to];
+    if (markerA && markerB) {
+      const latlngA = markerA.getLatLng();
+      const latlngB = markerB.getLatLng();
+      const unwrapped = unwrapLatLngs([[latlngA.lat, latlngA.lng], [latlngB.lat, latlngB.lng]]);
+      line.setLatLngs(unwrapped);
+      const norm = Math.min((e.pheromone || 1.0) / 10.0, 1.0);
+      line.setStyle({ opacity: baseOpacity + norm * 0.4 });
+    }
+  });
 }
 
 // ==============================================================
@@ -1396,7 +1575,8 @@ function handleNodeClick(node) {
   document.getElementById('hud-degree').textContent = isFailed ? '0 (Bị ngắt)' : `${degree} liên kết`;
 
   // Cập nhật giá trị tải lưu lượng và thanh trượt trong HUD
-  const loadData = nodeLoads[node.id] || {};
+  const nodeId = node.id || node.name;
+  const loadData = nodeLoads[nodeId] || {};
   const currentLoad = (loadData.load !== undefined) ? loadData.load : (node.load !== undefined ? node.load : 0.10);
   const isCongested = (currentLoad >= 0.75);
 
@@ -1687,6 +1867,9 @@ function applyTopology(nodes, edges) {
   nodeLookup = {};
   nodes.forEach(n => {
     nodeLookup[n.id] = n;
+    if (n.type === 'satellite') {
+      satPosMap.set(n.id, { id: n.id, lat: n.lat, lon: n.lon, alt_km: n.alt_km || 500 });
+    }
     if (n.load !== undefined) {
       if (!nodeLoads[n.id]) nodeLoads[n.id] = {};
       nodeLoads[n.id].load = n.load;
@@ -1719,7 +1902,7 @@ function displayBestPath(pathCoords, costMs) {
 
   // Cập nhật tuyến đường lên cả 3D và 2D
   update3DGlobeData(topology.nodes, topology.edges, pathCoords);
-  draw2DBestPath(pathCoords);
+  draw2DBestPath(pathCoords, dijkstraPathCoords, activeView === '2d');
 
   // Render danh sách node trong sidebar
   renderPathSidebar(pathCoords, costMs);
@@ -1836,6 +2019,18 @@ function handleWsMessage(msg) {
         applyTopology(msg.nodes, msg.edges);
       }
       renderFailedNodesUI();
+
+      // Kiểm tra trạng thái dropdown: nếu chưa chọn nguồn/đích, xóa sạch đường cũ trên cả client lẫn server
+      const initSrc = document.getElementById('sel-source')?.value;
+      const initDst = document.getElementById('sel-dest')?.value;
+      if (!initSrc || !initDst) {
+        userRouteActive = false;
+        bestPathCoords = [];
+        dijkstraPathCoords = [];
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'clear_route' }));
+        }
+      }
       break;
 
     case 'NODE_FAILED':
@@ -1965,7 +2160,7 @@ function handleWsMessage(msg) {
       bestPathCoords     = msg.aco_path_coords || [];
       dijkstraPathCoords = msg.dijkstra_coords || [];
       update3DGlobeData(topology.nodes, topology.edges, bestPathCoords, dijkstraPathCoords);
-      draw2DBestPath(bestPathCoords, dijkstraPathCoords);
+      draw2DBestPath(bestPathCoords, dijkstraPathCoords, activeView === '2d');
       break;
 
     case 'BATCH_RESULT':
@@ -2016,6 +2211,14 @@ function handleWsMessage(msg) {
 function handleRouteAdapted(msg) {
   if (!msg.path || msg.path.length < 2) return;
 
+  const selSrc = document.getElementById('sel-source')?.value;
+  const selDst = document.getElementById('sel-dest')?.value;
+
+  // Nếu người dùng chưa từng chủ động tìm đường hoặc dropdown không khớp với luồng này, bỏ qua không vẽ!
+  if (!userRouteActive || !selSrc || !selDst || selSrc !== msg.source || selDst !== msg.destination) {
+    return;
+  }
+
   const costMs = Number(msg.cost_ms) || 0;
   const rttMs = Number(msg.rtt_ms) || (costMs * 2);
 
@@ -2047,12 +2250,15 @@ function handleRouteAdapted(msg) {
     lastRouteArcUpdate = Date.now();
     update3DGlobeData(topology.nodes, topology.edges, bestPathCoords, dijkstraPathCoords);
     if (activeView === '2d') {
-      draw2DBestPath(bestPathCoords, dijkstraPathCoords);
+      draw2DBestPath(bestPathCoords, dijkstraPathCoords, false);
     }
   } else {
     // 2. Cùng danh sách vệ tinh, khoảng cách vật lý thay đổi liên tục theo bước bay
     if (msg.path_coords && msg.path_coords.length) {
       bestPathCoords = msg.path_coords;
+      if (activeView === '2d') {
+        draw2DBestPath(bestPathCoords, dijkstraPathCoords, false);
+      }
     }
   }
 
@@ -2078,7 +2284,9 @@ async function sendRoutingRequest() {
     return;
   }
 
+  userRouteActive = true;
   totalIter   = parseInt(document.getElementById('inp-iter').value) || 50;
+  const congWeight = parseFloat(document.getElementById('inp-congestion-weight')?.value) || 3.5;
   currentIter = 0;
   document.getElementById('iter-total').textContent = totalIter;
 
@@ -2087,15 +2295,21 @@ async function sendRoutingRequest() {
     '<span class="spinning">⏳</span> Đang thả bầy kiến tìm đường thích nghi...</div>';
 
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ action: 'route', source: src, destination: dst }));
+    ws.send(JSON.stringify({
+      action: 'route',
+      source: src,
+      destination: dst,
+      n_iterations: totalIter,
+      congestion_weight: congWeight
+    }));
     setRunningState(true);
   } else {
     // Fallback qua REST API nếu WebSocket chưa kết nối
     try {
-      log(`Fallback gọi REST API: ${src} → ${dst}`, 'warning');
+      log(`Fallback gọi REST API: ${src} → ${dst} (Congestion Weight=${congWeight})`, 'warning');
       setRunningState(true);
       const res = await fetch(
-        `${API_BASE}/routing?source=${src}&destination=${dst}&n_iter=${totalIter}&broadcast=false`
+        `${API_BASE}/routing?source=${encodeURIComponent(src)}&destination=${encodeURIComponent(dst)}&n_iter=${totalIter}&congestion_weight=${congWeight}&broadcast=false`
       );
       const data = await res.json();
       if (data.best_path) {
@@ -2133,17 +2347,20 @@ async function runCompare() {
   if (!src || !dst) { log('⚠️ Chọn Node Nguồn và Đích trước khi so sánh!', 'warning'); return; }
   if (src === dst)  { log('⚠️ Node Nguồn và Đích phải khác nhau!', 'warning'); return; }
 
+  userRouteActive = true;
   const btn  = document.getElementById('btn-compare');
   const spin = document.getElementById('cmp-spin');
   btn.disabled = true;
   spin.style.display = 'inline';
   document.getElementById('compare-result').style.display = 'none';
-  log(`🔬 So sánh ACO vs Dijkstra: ${src} → ${dst}...`, 'info');
+
+  const congWeight = parseFloat(document.getElementById('inp-congestion-weight')?.value) || 3.5;
+  log(`🔬 So sánh ACO vs Dijkstra: ${src} → ${dst} (Trọng số né nghẽn=${congWeight})...`, 'info');
 
   try {
     const nIter = parseInt(document.getElementById('inp-iter').value) || 50;
     const res   = await fetch(
-      `${API_BASE}/routing/compare?source=${encodeURIComponent(src)}&destination=${encodeURIComponent(dst)}&n_iter=${nIter}`
+      `${API_BASE}/routing/compare?source=${encodeURIComponent(src)}&destination=${encodeURIComponent(dst)}&n_iter=${nIter}&congestion_weight=${congWeight}`
     );
     if (!res.ok) { const err = await res.json(); log(`❌ Lỗi: ${err.detail}`, 'error'); return; }
     const data = await res.json();
@@ -2209,7 +2426,7 @@ function renderCompareResult(data) {
   dijkstraPathCoords = (dijk.found && dijk.path_coords) ? dijk.path_coords : [];
 
   update3DGlobeData(topology.nodes, topology.edges, bestPathCoords, dijkstraPathCoords);
-  draw2DBestPath(bestPathCoords, dijkstraPathCoords);
+  draw2DBestPath(bestPathCoords, dijkstraPathCoords, activeView === '2d');
 
   log(`⚖️ Kết quả: ACO=${aco.cost_ms?.toFixed(2)}ms (Đỏ) | Dijkstra=${dijk.cost_ms?.toFixed(2)}ms (Vàng) | ${cmp.verdict}`, 'success');
 }
@@ -2260,6 +2477,7 @@ function log(msg, type = 'info') {
 }
 
 function clearPath() {
+  userRouteActive    = false;
   bestPathCoords     = [];
   dijkstraPathCoords = [];
   multiFlows         = [];
@@ -2367,7 +2585,7 @@ async function runMultiFlowSimulation() {
       if (data.loads) nodeLoads = data.loads;
       renderMultiFlowBoard(multiFlows);
       update3DGlobeData(topology.nodes, topology.edges, bestPathCoords);
-      draw2DBestPath(bestPathCoords, dijkstraPathCoords);
+      draw2DBestPath(bestPathCoords, dijkstraPathCoords, activeView === '2d');
       log(`✅ Đã mô phỏng thành công ${multiFlows.length} luồng đồng thời! Các luồng tự động tách nhánh tránh nhau.`, 'success');
     }
   } catch (err) {
@@ -2432,6 +2650,30 @@ async function applySelectedNodeLoad() {
       nodeLoads[nodeId].load = data.load;
       nodeLoads[nodeId].is_congested = data.is_congested;
       nodeLoads[nodeId].active_conn = data.active_conn;
+
+      if (nodeLookup[nodeId]) {
+        nodeLookup[nodeId].load = data.load;
+        nodeLookup[nodeId].is_congested = data.is_congested;
+        nodeLookup[nodeId].active_conn = data.active_conn;
+      }
+      if (selectedNode) {
+        selectedNode.load = data.load;
+        selectedNode.is_congested = data.is_congested;
+        selectedNode.active_conn = data.active_conn;
+      }
+      if (topology && topology.nodes) {
+        const tn = topology.nodes.find(n => (n.id === nodeId || n.name === nodeId));
+        if (tn) {
+          tn.load = data.load;
+          tn.is_congested = data.is_congested;
+          tn.active_conn = data.active_conn;
+        }
+      }
+      if (cachedHtmlElementMap && cachedHtmlElementMap.has(nodeId)) {
+        const ce = cachedHtmlElementMap.get(nodeId);
+        ce.load = data.load;
+        ce.is_congested = data.is_congested;
+      }
 
       update3DGlobeData(topology.nodes, topology.edges, bestPathCoords);
       handleNodeClick(selectedNode);
@@ -2516,6 +2758,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   document.getElementById('hud-apply-load')?.addEventListener('click', applySelectedNodeLoad);
+
+  // 6c. Khởi tạo & Gắn sự kiện Trọng số né tránh tắc nghẽn ACO (Congestion Avoidance Weight)
+  const congInput = document.getElementById('inp-congestion-weight');
+  const congValText = document.getElementById('val-congestion-weight');
+  if (congInput) {
+    const savedCong = localStorage.getItem('sagsins_congestion_weight');
+    if (savedCong) {
+      congInput.value = savedCong;
+      if (congValText) congValText.textContent = savedCong;
+    }
+    congInput.addEventListener('input', (e) => {
+      const v = e.target.value;
+      if (congValText) congValText.textContent = v;
+      localStorage.setItem('sagsins_congestion_weight', v);
+    });
+  }
 
   // 7. Gắn sự kiện nút chức năng chính
   document.getElementById('btn-route').addEventListener('click', sendRoutingRequest);
