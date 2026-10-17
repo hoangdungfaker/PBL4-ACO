@@ -1,0 +1,16 @@
+Pair,Source,Destination,ACO_Cost_ms,Dijkstra_Cost_ms,Optimality_%,Verdict,Same_Path,ACO_Hops,Dijkstra_Hops,ACO_Runtime_ms,Dijkstra_Runtime_ms,ACO_Path,Dijkstra_Path
+GND_Ha_Noi -> GND_Da_Nang,GND_Ha_Noi,GND_Da_Nang,14.6,14.6,100.0,OPTIMAL,True,2,2,135.5,0.3275,GND_Ha_Noi -> SAT_10 -> GND_Da_Nang,GND_Ha_Noi -> SAT_10 -> GND_Da_Nang
+GND_Ha_Noi -> GND_Bien_Dong,GND_Ha_Noi,GND_Bien_Dong,13.41,13.41,100.0,OPTIMAL,True,2,2,205.09,0.1555,GND_Ha_Noi -> SAT_59 -> GND_Bien_Dong,GND_Ha_Noi -> SAT_59 -> GND_Bien_Dong
+GND_Ha_Noi -> SHIP_1,GND_Ha_Noi,SHIP_1,13.86,13.2,105.03,NEAR_OPTIMAL,False,2,2,161.21,0.1584,GND_Ha_Noi -> SAT_55 -> SHIP_1,GND_Ha_Noi -> SAT_59 -> SHIP_1
+GND_Ha_Noi -> SHIP_2,GND_Ha_Noi,SHIP_2,12.32,12.32,100.0,OPTIMAL,True,2,2,195.31,0.1383,GND_Ha_Noi -> SAT_59 -> SHIP_2,GND_Ha_Noi -> SAT_59 -> SHIP_2
+GND_Ha_Noi -> UAV_1,GND_Ha_Noi,UAV_1,14.69,14.64,100.32,OPTIMAL,False,3,2,110.23,0.1578,GND_Ha_Noi -> SAT_59 -> SHIP_1 -> UAV_1,GND_Ha_Noi -> SAT_59 -> UAV_1
+GND_Da_Nang -> GND_Bien_Dong,GND_Da_Nang,GND_Bien_Dong,2.58,2.58,100.0,OPTIMAL,True,2,2,153.53,0.1288,GND_Da_Nang -> UAV_1 -> GND_Bien_Dong,GND_Da_Nang -> UAV_1 -> GND_Bien_Dong
+GND_Da_Nang -> SHIP_1,GND_Da_Nang,SHIP_1,2.35,2.35,100.0,OPTIMAL,True,2,2,158.39,0.0914,GND_Da_Nang -> UAV_1 -> SHIP_1,GND_Da_Nang -> UAV_1 -> SHIP_1
+GND_Da_Nang -> SHIP_2,GND_Da_Nang,SHIP_2,10.44,10.3,101.3,NEAR_OPTIMAL,False,4,2,206.96,0.1681,GND_Da_Nang -> UAV_1 -> SHIP_1 -> SAT_59 -> SHIP_2,GND_Da_Nang -> SAT_59 -> SHIP_2
+GND_Da_Nang -> UAV_1,GND_Da_Nang,UAV_1,0.86,0.86,100.0,OPTIMAL,True,1,1,34.4,0.0811,GND_Da_Nang -> UAV_1,GND_Da_Nang -> UAV_1
+GND_Bien_Dong -> SHIP_1,GND_Bien_Dong,SHIP_1,3.2,3.2,100.0,OPTIMAL,True,2,2,166.03,0.0963,GND_Bien_Dong -> UAV_1 -> SHIP_1,GND_Bien_Dong -> UAV_1 -> SHIP_1
+GND_Bien_Dong -> SHIP_2,GND_Bien_Dong,SHIP_2,8.86,8.3,106.79,NEAR_OPTIMAL,False,2,2,198.38,0.1438,GND_Bien_Dong -> SAT_55 -> SHIP_2,GND_Bien_Dong -> SAT_59 -> SHIP_2
+GND_Bien_Dong -> UAV_1,GND_Bien_Dong,UAV_1,1.72,1.72,100.0,OPTIMAL,True,1,1,52.89,0.0807,GND_Bien_Dong -> UAV_1,GND_Bien_Dong -> UAV_1
+SHIP_1 -> SHIP_2,SHIP_1,SHIP_2,8.74,8.09,108.05,NEAR_OPTIMAL,False,3,2,194.57,0.1339,SHIP_1 -> SAT_59 -> SAT_55 -> SHIP_2,SHIP_1 -> SAT_59 -> SHIP_2
+SHIP_1 -> UAV_1,SHIP_1,UAV_1,1.49,1.49,100.0,OPTIMAL,True,1,1,43.22,0.1804,SHIP_1 -> UAV_1,SHIP_1 -> UAV_1
+SHIP_2 -> UAV_1,SHIP_2,UAV_1,9.57,9.53,100.48,OPTIMAL,False,3,2,107.17,0.14,SHIP_2 -> SAT_59 -> SHIP_1 -> UAV_1,SHIP_2 -> SAT_59 -> UAV_1

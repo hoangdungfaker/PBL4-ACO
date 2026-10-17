@@ -1,0 +1,22 @@
+# ============================================================
+# PBL4 — SAGSINs ACO  |  requirements.txt
+# ============================================================
+
+# Stage 1 — D? li?u không gian & Topology
+networkx>=3.0
+numpy>=1.24
+matplotlib>=3.7
+skyfield>=1.46
+scipy>=1.11
+
+# Stage 2 — Lõi OS (built-in, không c?n cài)
+# threading, queue, concurrent.futures — có s?n trong Python
+
+# Stage 3 — Server m?ng
+fastapi>=0.110
+uvicorn[standard]>=0.29
+websockets>=12.0
+
+# Ti?n ích
+pandas>=2.0
+pytest>=8.0

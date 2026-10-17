@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAGSINs ACO — Adaptive Routing 3D Dashboard | PBL4</title>
+  <meta name="description" content="PBL4 — Ant Colony Optimization routing for Space-Air-Ground-Sea Integrated Networks. 3D Digital Globe & 2D Leaflet visualization.">
+
+  <!-- Leaflet.js CSS (cho chế độ bản đồ 2D) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css?v=2.8">
+</head>
+
+<body>
+<div id="app">
+
+  <!-- ══ HEADER ══════════════════════════════════════════════ -->
+  <header id="header">
+    <div class="header-logo">
+      <div class="logo-icon">🛰️</div>
+      <div class="logo-text">
+        <h1>SAGSINs ACO Routing</h1>
+        <span class="logo-sub">Space-Air-Ground-Sea Digital Twin</span>
+      </div>
+    </div>
+
+    <!-- Nút chuyển đổi chế độ xem 3D Không gian / 2D Bản đồ -->
+    <div class="header-center">
+      <div class="view-mode-selector">
+        <button id="btn-mode-3d" class="mode-btn active" title="Không gian số 3D trực quan">
+          <span class="mode-icon">🌐</span>
+          <span>Không gian 3D</span>
+        </button>
+        <button id="btn-mode-2d" class="mode-btn" title="Bản đồ phẳng 2D chi tiết">
+          <span class="mode-icon">🗺️</span>
+          <span>Bản đồ 2D</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div id="ws-dot" class="status-dot offline"></div>
+      <span id="ws-text">Đang kết nối...</span>
+      <span class="header-divider">|</span>
+      <span class="header-badge">PBL4 — OS &amp; Network</span>
+    </div>
+  </header>
+
+  <!-- ══ SIDEBAR ═════════════════════════════════════════════ -->
+  <aside id="sidebar">
+
+    <!-- ── Nút Thu/Mở Sidebar ── -->
+    <button id="btn-sidebar-toggle" title="Thu gọn / Mở rộng sidebar">
+      <span id="sidebar-toggle-icon">◀</span>
+    </button>
+
+    <div id="sidebar-content">
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 1: TÌM ĐƯỜNG
+           Người dùng chọn điểm Nguồn → Đích → bấm Tìm
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label">① TÌM ĐƯỜNG</div>
+
+      <div class="card">
+        <div class="card-title">⚡ Cấu Hình Routing (ACO)</div>
+
+        <!-- Chọn Nguồn -->
+        <div class="form-group">
+          <label for="sel-source">
+            <span class="label-dot" style="background:#4ade80"></span>
+            Node Nguồn <span style="color:#64748b;font-weight:400">(Source)</span>
+          </label>
+          <select id="sel-source" class="form-control">
+            <option value="">-- Chọn node --</option>
+          </select>
+        </div>
+
+        <!-- Chọn Đích -->
+        <div class="form-group">
+          <label for="sel-dest">
+            <span class="label-dot" style="background:#ef4444"></span>
+            Node Đích <span style="color:#64748b;font-weight:400">(Destination)</span>
+          </label>
+          <select id="sel-dest" class="form-control">
+            <option value="">-- Chọn node --</option>
+          </select>
+        </div>
+
+        <!-- Số Iteration -->
+        <div class="form-group">
+          <label for="inp-iter">Số vòng lặp ACO (iterations)</label>
+          <select id="inp-iter" class="form-control">
+            <option value="30">30 — Nhanh (demo)</option>
+            <option value="50" selected>50 — Mặc định</option>
+            <option value="100">100 — Chính xác hơn</option>
+          </select>
+        </div>
+
+        <!-- Hành động -->
+        <button id="btn-route" class="btn btn-primary">
+          <span id="btn-spin" style="display:none" class="spinning">⏳</span>
+          🐜 Tìm Đường ACO
+        </button>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+          <button id="btn-clear"  class="btn btn-secondary">🗑️ Xóa tuyến</button>
+          <button id="btn-reload" class="btn btn-secondary">🔄 Tải lại</button>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 2: KẾT QUẢ
+           Hiển thị tuyến đường tìm được + số liệu chất lượng
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label">② KẾT QUẢ</div>
+
+      <!-- Tiến trình ACO (ẩn cho gọn, hiện khi đang chạy) -->
+      <div class="card" id="card-progress" style="display:none">
+        <div class="card-title">🐜 Tiến Trình ACO</div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px">
+          <span>Vòng lặp</span>
+          <span><span id="iter-display">0</span> / <span id="iter-total">50</span></span>
+        </div>
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+      </div>
+
+      <!-- Thống kê tuyến đường -->
+      <div class="card">
+        <div class="card-title">📊 Số Liệu Tuyến Đường</div>
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-label">Nodes mạng</div>
+            <div id="stat-nodes" class="stat-value">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Liên kết (Edges)</div>
+            <div id="stat-edges" class="stat-value">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Trễ 1 chiều</div>
+            <div id="stat-cost" class="stat-value yellow">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">RTT (khứ hồi)</div>
+            <div id="stat-rtt" class="stat-value green">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Bước nhảy</div>
+            <div id="stat-hops" class="stat-value">--</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Clients WS</div>
+            <div id="stat-clients" class="stat-value">1</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tuyến đường tối ưu -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="card-title" style="margin-bottom:0">🛤️ Tuyến Đường Tối Ưu</div>
+          <div id="badge-auto-route" style="display:none;font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;background:rgba(16,185,129,0.15);border:1px solid #10b981;color:#6ee7b7;align-items:center;gap:5px" title="Hệ thống tự động tính toán lại lộ trình tối ưu khi vệ tinh di chuyển trên quỹ đạo">
+            <span style="width:6px;height:6px;border-radius:50%;background:#10b981;display:inline-block;box-shadow:0 0 6px #10b981"></span>
+            Tự Thích Nghi
+          </div>
+        </div>
+        <div id="path-display">
+          <div style="color:#475569;font-size:12px">Chưa có đường đi nào</div>
+        </div>
+      </div>
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 3: SO SÁNH & PHÂN TÍCH
+           So sánh ACO vs Dijkstra (dành cho thuyết trình)
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label sb-section-collapsible" data-target="collapse-compare">
+        ③ SO SÁNH & PHÂN TÍCH
+        <span class="sb-chevron">▼</span>
+      </div>
+      <div id="collapse-compare" class="sb-collapse-body">
+
+        <div class="card">
+          <div class="card-title">🔬 ACO vs Dijkstra</div>
+          <p class="sb-hint">So sánh chất lượng đường đi ACO (Bầy kiến) so với Dijkstra (chuẩn 100% tối ưu). Dùng khi thuyết trình.</p>
+
+          <button id="btn-compare" class="btn btn-primary" style="margin-bottom:10px;background:linear-gradient(135deg,#7c3aed,#4f46e5)">
+            <span id="cmp-spin" style="display:none" class="spinning">⏳</span>
+            ⚖️ So Sánh Ngay
+          </button>
+
+          <div id="compare-result" style="display:none">
+            <div id="cmp-verdict" class="cmp-verdict-box"></div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+              <div class="cmp-col cmp-col-aco">
+                <div class="cmp-col-title" style="color:#38bdf8">🐜 ACO</div>
+                <div class="cmp-metric-label">Độ trễ:</div>
+                <div id="cmp-aco-cost" class="cmp-metric-value">--</div>
+                <div class="cmp-metric-label">Số hop:</div>
+                <div id="cmp-aco-hops" class="cmp-metric-value">--</div>
+                <div class="cmp-metric-label">Hội tụ:</div>
+                <div id="cmp-aco-iter" class="cmp-metric-value" style="font-size:10px">--</div>
+              </div>
+              <div class="cmp-col cmp-col-dijk">
+                <div class="cmp-col-title" style="color:#4ade80">📐 Dijkstra</div>
+                <div class="cmp-metric-label">Độ trễ:</div>
+                <div id="cmp-dijk-cost" class="cmp-metric-value">--</div>
+                <div class="cmp-metric-label">Số hop:</div>
+                <div id="cmp-dijk-hops" class="cmp-metric-value">--</div>
+                <div class="cmp-metric-label">Chênh lệch:</div>
+                <div id="cmp-diff" class="cmp-metric-value" style="font-size:10px">--</div>
+              </div>
+            </div>
+
+            <div style="font-size:10px;color:#64748b;margin-bottom:3px">Chất lượng ACO so với tối ưu:</div>
+            <div style="background:#1e293b;border-radius:4px;height:10px;overflow:hidden;margin-bottom:6px">
+              <div id="cmp-quality-bar" style="height:100%;border-radius:4px;transition:width 0.6s ease"></div>
+            </div>
+            <div id="cmp-quality-txt" style="font-size:11px;text-align:center;font-weight:600"></div>
+
+            <!-- Chú thích màu -->
+            <div class="route-legend-row">
+              <span class="route-legend-line" style="background:#ef4444"></span>
+              <span style="color:#f87171">ACO (Đỏ)</span>
+              <span class="route-legend-line" style="background:#facc15;margin-left:10px"></span>
+              <span style="color:#facc15">Dijkstra (Vàng)</span>
+            </div>
+
+            <div style="margin-top:8px;font-size:10px;color:#f87171;font-weight:600">🔴 Tuyến ACO:</div>
+            <div id="cmp-aco-path" style="font-size:10px;color:#fca5a5;word-break:break-all;margin-bottom:6px"></div>
+            <div style="font-size:10px;color:#facc15;font-weight:600">🟡 Tuyến Dijkstra:</div>
+            <div id="cmp-dijk-path" style="font-size:10px;color:#fef08a;word-break:break-all"></div>
+          </div>
+        </div>
+
+      </div><!-- /collapse-compare -->
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 4: MÔ PHỎNG SỰ CỐ
+           Giả lập node hỏng → xem ACO tự tìm đường vòng
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label sb-section-collapsible" data-target="collapse-fault">
+        ④ MÔ PHỎNG SỰ CỐ
+        <span class="sb-chevron">▼</span>
+      </div>
+      <div id="collapse-fault" class="sb-collapse-body">
+
+        <div class="card sb-card-danger">
+          <div class="card-title" style="color:#f87171">⚠️ Fault Tolerance</div>
+          <p class="sb-hint">Giả lập vệ tinh/trạm bị hỏng (mất điện, nhiễu sóng). Khi node trên đường đi bị đánh sập, ACO tự động tìm đường vòng.</p>
+
+          <div class="form-group">
+            <label for="sel-fail-node">Chọn nút cần giả lập sự cố</label>
+            <select id="sel-fail-node" class="form-control">
+              <option value="">-- Chọn nút --</option>
+            </select>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+            <button id="btn-toggle-fail" class="btn btn-secondary sb-btn-danger">
+              💥 Đánh sập
+            </button>
+            <button id="btn-restore-all" class="btn btn-secondary sb-btn-success">
+              🟢 Khôi phục hết
+            </button>
+          </div>
+
+          <div id="failed-nodes-container" style="margin-top:8px;display:none;background:rgba(0,0,0,0.3);padding:6px;border-radius:6px;border:1px dashed #ef4444">
+            <div style="font-size:10px;font-weight:700;color:#f87171;margin-bottom:4px">ĐANG BỊ HỎNG:</div>
+            <div id="failed-nodes-list" style="font-size:11px;color:#fca5a5;display:flex;flex-wrap:wrap;gap:4px"></div>
+          </div>
+        </div>
+
+      </div><!-- /collapse-fault -->
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 5: CÂN BẰNG TẢI
+           Mô phỏng giờ cao điểm, 5 luồng đồng thời
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label sb-section-collapsible" data-target="collapse-load">
+        ⑤ CÂN BẰNG TẢI
+        <span class="sb-chevron">▼</span>
+      </div>
+      <div id="collapse-load" class="sb-collapse-body">
+
+        <div class="card sb-card-warning">
+          <div class="card-title" style="color:#fbbf24">🚦 Load Balancing</div>
+          <p class="sb-hint">Mô phỏng 5 luồng dữ liệu đồng thời vào giờ cao điểm. ACO tự điều hướng tránh node nghẽn (&ge;75% tải).</p>
+
+          <button id="btn-multiflow" class="btn btn-primary" style="margin-bottom:6px;background:linear-gradient(135deg,#f59e0b,#d97706);font-size:12px;font-weight:700">
+            <span id="multiflow-spin" style="display:none" class="spinning">⏳</span>
+            ⚡ Mô Phỏng Giờ Cao Điểm (5 Luồng)
+          </button>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+            <button id="btn-simulate-traffic" class="btn btn-secondary sb-btn-warn">
+              🎲 Bơm Tải Ngẫu Nhiên
+            </button>
+            <button id="btn-reset-traffic" class="btn btn-secondary">
+              🔄 Reset Tải (10%)
+            </button>
+          </div>
+
+          <div id="multiflow-board" style="display:none;background:rgba(0,0,0,0.4);padding:8px;border-radius:6px;border:1px solid rgba(245,158,11,0.3)">
+            <div style="display:flex;justify-content:space-between;font-size:10px;font-weight:700;color:#fbbf24;margin-bottom:6px">
+              <span>KẾT QUẢ 5 LUỒNG:</span>
+              <span id="multiflow-count">5/5 Xong</span>
+            </div>
+            <div id="multiflow-list" style="display:flex;flex-direction:column;gap:5px;font-size:10px"></div>
+          </div>
+        </div>
+
+      </div><!-- /collapse-load -->
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 6: CƠ SỞ DỮ LIỆU & BÁO CÁO (SQLITE DB)
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label sb-section-collapsible" data-target="collapse-db">
+        ⑥ CƠ SỞ DỮ LIỆU & BÁO CÁO
+        <span class="sb-chevron">▼</span>
+      </div>
+      <div id="collapse-db" class="sb-collapse-body">
+
+        <div class="card" style="border: 1px solid rgba(56, 189, 248, 0.35); background: linear-gradient(180deg, rgba(30, 41, 59, 0.7), rgba(14, 116, 144, 0.2));">
+          <div class="card-title" style="color:#38bdf8">💾 Cơ Sở Dữ Liệu Bền Vững</div>
+          <p class="sb-hint">Toàn bộ lịch sử định tuyến, kết quả đối chiếu thuật toán và nhật ký chuyển giao được lưu trữ bền vững vào SQLite (thay vì RAM).</p>
+
+          <div class="stats-grid" style="margin-bottom:8px">
+            <div class="stat-item">
+              <div class="stat-label">Số phiên đã lưu</div>
+              <div id="db-total-routes" class="stat-value" style="color:#38bdf8">--</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Dung lượng DB</div>
+              <div id="db-size" class="stat-value green">-- KB</div>
+            </div>
+          </div>
+
+          <a href="http://localhost:8000/db/export/csv" target="_blank" download="sagsins_routing_history.csv"
+             class="btn btn-primary" style="display:flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;background:linear-gradient(135deg,#0284c7,#0369a1);font-size:11px;font-weight:700">
+            📥 Xuất Báo Cáo Định Tuyến (CSV)
+          </a>
+        </div>
+
+      </div><!-- /collapse-db -->
+
+      <!-- ══════════════════════════════════════════════════════
+           PHẦN 7: CHÚ THÍCH & LOG
+      ══════════════════════════════════════════════════════ -->
+      <div class="sb-section-label sb-section-collapsible" data-target="collapse-legend">
+        ⑦ CHÚ THÍCH & LOG
+        <span class="sb-chevron">▼</span>
+      </div>
+      <div id="collapse-legend" class="sb-collapse-body">
+
+        <div class="card">
+          <div class="card-title">🗺️ Chú Thích Tầng Mạng</div>
+          <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#38bdf8;box-shadow:0 0 6px #38bdf8"></div>🛰️ <b>Space</b> — Vệ tinh LEO (Starlink)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#4ade80;box-shadow:0 0 6px #4ade80"></div>📡 <b>Ground</b> — Trạm cổng mặt đất</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#facc15;box-shadow:0 0 6px #facc15"></div>✈️ <b>Air</b> — UAV bay không người lái</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#2dd4bf;box-shadow:0 0 6px #2dd4bf"></div>🚢 <b>Sea</b> — Tàu viễn dương</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ef4444;box-shadow:0 0 6px #ef4444"></div>❌ <b>Sự cố</b> — Node bị hỏng</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f97316;box-shadow:0 0 8px #f97316"></div>🔥 <b>Nghẽn</b> — Tải &ge;75%</div>
+            <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px">
+              <div class="legend-item"><div class="legend-line" style="background:linear-gradient(90deg,#ef4444,#ff1e56)"></div>Tuyến ACO tối ưu (Đỏ)</div>
+              <div class="legend-item"><div class="legend-line" style="background:#facc15"></div>Tuyến Dijkstra đối chiếu (Vàng)</div>
+              <div class="legend-item"><div class="legend-line" style="background:#3b82f6"></div>Lưới ISL nền (Xanh mờ)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between">
+            <span>💻 Console Log</span>
+            <button onclick="document.getElementById('log-console').innerHTML=''"
+              style="background:none;border:none;color:#475569;cursor:pointer;font-size:10px">xóa</button>
+          </div>
+          <div id="log-console"></div>
+        </div>
+
+      </div><!-- /collapse-legend -->
+
+    </div><!-- /#sidebar-content -->
+  </aside>
+
+
+
+
+  <!-- ══ MAIN VIEWPORT ════════════════════════════════════════ -->
+  <main id="map-container">
+    <!-- View 3D Globe (Mặc định) -->
+    <div id="globe-3d" class="viewport-panel active"></div>
+
+    <!-- View 2D Leaflet Map -->
+    <div id="map" class="viewport-panel"></div>
+
+    <!-- Floating 3D Controls Toolbar -->
+    <div id="toolbar-3d" class="floating-toolbar">
+      <button id="btn-view-vn" class="toolbar-btn" title="Góc nhìn khu vực Biển Đông & Việt Nam">
+        🇻🇳 Biển Đông
+      </button>
+      <button id="btn-view-global" class="toolbar-btn" title="Góc nhìn toàn cầu">
+        🌍 Toàn cầu
+      </button>
+      <button id="btn-view-route" class="toolbar-btn" title="Khóa góc nhìn theo lộ trình ACO">
+        🎯 Lộ trình
+      </button>
+      <button id="btn-toggle-rotate" class="toolbar-btn active" title="Bật/Tắt tự động xoay Trái Đất">
+        🔄 Tự xoay: Bật
+      </button>
+      <button id="btn-toggle-isl" class="toolbar-btn active" title="Chuyển chế độ hiển thị lưới ISL: Mờ / Ẩn / Rõ">
+        🔗 Lưới ISL: Mờ
+      </button>
+      <button id="btn-toggle-clouds" class="toolbar-btn active" title="Bật/Tắt lớp mây khí quyển chuyển động">
+        ☁️ Mây: Bật
+      </button>
+      <div class="toolbar-divider"></div>
+      <button id="btn-toggle-orbit" class="toolbar-btn active" title="Tạm dừng hoặc Tiếp tục chuyển động quỹ đạo SGP4 của vệ tinh">
+        ⏸️ Quỹ đạo: Chạy
+      </button>
+      <button id="btn-orbit-speed" class="toolbar-btn active" title="Thay đổi tốc độ mô phỏng quỹ đạo vệ tinh (1x, 5x, 15x, 30x, 60x)">
+        ⚡ 15x
+      </button>
+      <div id="orbit-sim-clock" class="toolbar-badge" title="Đồng hồ thời gian thực tế mô phỏng quỹ đạo SGP4 Starlink">
+        <span class="pulse-dot"></span>
+        <span id="sim-clock-text">⏱️ 00:00:00 UTC (15x)</span>
+      </div>
+    </div>
+
+    <!-- Node Detail HUD (Floating Inspector khi click vào Node) -->
+    <div id="node-hud" class="node-hud-card" style="display:none">
+      <div class="node-hud-header">
+        <span id="hud-icon" class="hud-icon">🛰️</span>
+        <div class="hud-title-wrap">
+          <div id="hud-name" class="hud-name">STARLINK-1008</div>
+          <div id="hud-type" class="hud-type">Space Satellite</div>
+        </div>
+        <button id="hud-close" class="hud-close">&times;</button>
+      </div>
+      <div class="hud-body">
+        <div class="hud-stat-row">
+          <span>Vĩ độ (Lat):</span>
+          <strong id="hud-lat">--</strong>
+        </div>
+        <div class="hud-stat-row">
+          <span>Kinh độ (Lon):</span>
+          <strong id="hud-lon">--</strong>
+        </div>
+        <div class="hud-stat-row">
+          <span>Độ cao (Alt):</span>
+          <strong id="hud-alt">--</strong>
+        </div>
+        <div class="hud-stat-row">
+          <span>Liên kết lân cận:</span>
+          <strong id="hud-degree">--</strong>
+        </div>
+
+        <!-- Điều chỉnh Tải Lưu Lượng (Load / Congestion Control) -->
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px">
+            <span style="color:#f59e0b;font-weight:600">📊 Tải Lưu Lượng:</span>
+            <strong><span id="hud-load-val">10%</span> (<span id="hud-load-status">Bình thường</span>)</strong>
+          </div>
+          <input type="range" id="hud-load-slider" min="0" max="100" value="10" 
+            style="width:100%;cursor:pointer;accent-color:#f59e0b;margin-bottom:6px">
+          <button id="hud-apply-load" class="btn-hud" style="width:100%;background:rgba(245,158,11,0.2);border:1px solid #f59e0b;color:#fbbf24;font-size:10px;padding:4px 6px">
+            🔥 Bơm Tải Nút Này (Test Bẻ Lái ACO)
+          </button>
+        </div>
+      </div>
+      <div class="hud-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px">
+        <button id="hud-set-source" class="btn-hud btn-hud-src">📍 Đặt làm Nguồn</button>
+        <button id="hud-set-dest" class="btn-hud btn-hud-dst">🎯 Đặt làm Đích</button>
+      </div>
+      <button id="hud-toggle-fail" class="btn-hud" style="margin-top:6px;width:100%;background:#991b1b;color:#fecaca;border:1px solid #ef4444;font-weight:600">
+        💥 Đánh Sập Nút (Fail)
+      </button>
+    </div>
+
+    <!-- Overlay badges -->
+    <div id="map-overlay">
+      <div class="overlay-badge">
+        🌐 Chế độ: <span id="ovl-mode">3D Globe</span>
+      </div>
+      <div class="overlay-badge">
+        🛰️ Tổng Nodes: <span id="ovl-sats">--</span>
+      </div>
+      <div class="overlay-badge">
+        🔗 Tổng Edges: <span id="ovl-edges">--</span>
+      </div>
+      <div class="overlay-badge">
+        🐜 Đàn kiến: <span>15 con/vòng</span>
+      </div>
+    </div>
+  </main>
+
+</div><!-- /#app -->
+
+<!-- ══ SCRIPTS ═══════════════════════════════════════════════ -->
+<!-- Globe.gl 3D Library (Tích hợp Three.js & OrbitControls) -->
+<script src="lib/globe.min.js"></script>
+
+<!-- Leaflet.js (2D Map fallback) -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet PolylineDecorator -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-polylinedecorator/1.6.0/leaflet.polylineDecorator.min.js"></script>
+
+<!-- App JS (Quản lý 3D Globe + 2D Leaflet + WebSocket) -->
+<script src="network_map.js?v=4.4"></script>
+
+</body>
+</html>
